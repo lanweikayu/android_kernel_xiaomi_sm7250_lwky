@@ -468,6 +468,24 @@ config BOARD_XIAOMI_SM7250
 	select ARCH_LITO
 	help
 	  This enables support for XiaoMi SM7250 (lito) Family
+
+config BOARD_PICASSO
+	bool "Picasso and Picasso_48m platform"
+	select BOARD_XIAOMI_SM7250
+	help
+	  This enables support for Xiaomi Redmi K30 5G / Redmi K30i 5G
+
+config BOARD_MONET
+	bool "Monet platform"
+	select BOARD_XIAOMI_SM7250
+	help
+	  This enables support for Xiaomi MI 10 Lite 5G
+
+config BOARD_VANGOGH
+	bool "Vangogh platform"
+	select BOARD_XIAOMI_SM7250
+	help
+	  This enables support for Xiaomi MI 10 Lite Zoom
 endif
 endmenu
 
