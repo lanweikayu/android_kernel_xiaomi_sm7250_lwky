@@ -978,5 +978,10 @@
 };
 
 &pm8008_8 {
+	status = "disabled";
 	pinctrl-0 = <&pm8008_active>; //liuqinhong@xiaomi.com
+};
+
+&pm8008_9 {
+	status = "disabled";
 };
