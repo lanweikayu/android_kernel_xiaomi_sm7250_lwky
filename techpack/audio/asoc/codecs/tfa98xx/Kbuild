@@ -79,6 +79,7 @@ ifdef CONFIG_SND_SOC_TFA9874
 	#TFA98XX_OBJS += src/tfa_debug.o
 endif
 
+ccflags-y += -I$(srctree)/techpack/audio/asoc/codecs/tfa98xx/inc
 LINUX_INC += -Iinclude/linux
 
 INCS +=	$(COMMON_INC) \
