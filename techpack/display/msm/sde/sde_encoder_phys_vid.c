@@ -868,40 +868,56 @@ static void sde_encoder_phys_vid_get_hw_resources(
 }
 
 static int _sde_encoder_phys_vid_wait_for_vblank(
-		struct sde_encoder_phys *phys_enc, bool notify)
+	struct sde_encoder_phys *phys_enc, bool notify)
 {
 	struct sde_encoder_wait_info wait_info = {0};
 	int ret = 0;
 	u32 event = SDE_ENCODER_FRAME_EVENT_ERROR |
-		SDE_ENCODER_FRAME_EVENT_SIGNAL_RELEASE_FENCE |
-		SDE_ENCODER_FRAME_EVENT_SIGNAL_RETIRE_FENCE;
+	SDE_ENCODER_FRAME_EVENT_SIGNAL_RELEASE_FENCE |
+	SDE_ENCODER_FRAME_EVENT_SIGNAL_RETIRE_FENCE;
 
 	if (!phys_enc) {
 		pr_err("invalid encoder\n");
 		return -EINVAL;
 	}
 
-	wait_info.wq = &phys_enc->pending_kickoff_wq;
-	wait_info.atomic_cnt = &phys_enc->pending_kickoff_cnt;
-	wait_info.timeout_ms = KICKOFF_TIMEOUT_MS;
+	/*
+	* If IRQ is not enabled (e.g., disabled by suspend or never registered),
+	* we cannot wait for vblank. Trigger recovery immediately to avoid
+	* blocking and to release pending fences.
+	*/
+	if (!phys_enc->irq_enabled) {
+			pr_warn("IRQ not enabled, force recovery\n");
+			if (notify &&
+				atomic_add_unless(&phys_enc->pending_retire_fence_cnt, -1, 0) &&
+				phys_enc->parent_ops.handle_frame_done) {
+					phys_enc->parent_ops.handle_frame_done(
+						phys_enc->parent, phys_enc, event);
+			}
+			/* Return success to let upper layer proceed */
+			return 0;
+	}
 
-	/* Wait for kickoff to complete */
-	ret = sde_encoder_helper_wait_for_irq(phys_enc, INTR_IDX_VSYNC,
-			&wait_info);
+			wait_info.wq = &phys_enc->pending_kickoff_wq;
+			wait_info.atomic_cnt = &phys_enc->pending_kickoff_cnt;
+			wait_info.timeout_ms = KICKOFF_TIMEOUT_MS;
 
-	if (notify && (ret == -ETIMEDOUT) &&
-	    atomic_add_unless(&phys_enc->pending_retire_fence_cnt, -1, 0) &&
-	    phys_enc->parent_ops.handle_frame_done)
-		phys_enc->parent_ops.handle_frame_done(
-			phys_enc->parent, phys_enc, event);
+			/* Wait for kickoff to complete */
+			ret = sde_encoder_helper_wait_for_irq(phys_enc, INTR_IDX_VSYNC,
+												  &wait_info);
 
-	SDE_EVT32(DRMID(phys_enc->parent), event, notify, ret,
-			ret ? SDE_EVTLOG_FATAL : 0);
-	return ret;
+			if (notify && (ret == -ETIMEDOUT) &&
+				atomic_add_unless(&phys_enc->pending_retire_fence_cnt, -1, 0) &&
+				phys_enc->parent_ops.handle_frame_done)
+				phys_enc->parent_ops.handle_frame_done(
+					phys_enc->parent, phys_enc, event);
+
+				SDE_EVT32(DRMID(phys_enc->parent), event, notify, ret,
+						  ret ? SDE_EVTLOG_FATAL : 0);
+				return ret;
 }
 
-static int sde_encoder_phys_vid_wait_for_vblank(
-		struct sde_encoder_phys *phys_enc)
+static int sde_encoder_phys_vid_wait_for_vblank(struct sde_encoder_phys *phys_enc)
 {
 	return _sde_encoder_phys_vid_wait_for_vblank(phys_enc, true);
 }
@@ -1192,11 +1208,15 @@ static void sde_encoder_phys_vid_prepare_for_commit(
 static void sde_encoder_phys_vid_irq_control(struct sde_encoder_phys *phys_enc,
 		bool enable)
 {
+
 	struct sde_encoder_phys_vid *vid_enc;
 	int ret;
 
 	if (!phys_enc)
 		return;
+
+	/* 更新 IRQ 使能状态标志 */
+	phys_enc->irq_enabled = enable;
 
 	vid_enc = to_sde_encoder_phys_vid(phys_enc);
 

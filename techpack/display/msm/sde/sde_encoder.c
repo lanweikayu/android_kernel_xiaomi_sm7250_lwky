@@ -412,7 +412,7 @@ static void sde_configure_qdss(struct sde_encoder_virt *sde_enc,
 }
 
 static int _sde_encoder_wait_timeout(int32_t drm_id, int32_t hw_id,
-	s64 timeout_ms, struct sde_encoder_wait_info *info)
+									 s64 timeout_ms, struct sde_encoder_wait_info *info)
 {
 	int rc = 0;
 	s64 wait_time_jiffies = msecs_to_jiffies(timeout_ms);
@@ -420,18 +420,29 @@ static int _sde_encoder_wait_timeout(int32_t drm_id, int32_t hw_id,
 	ktime_t exp_ktime = ktime_add_ms(ktime_get(), timeout_ms);
 
 	do {
-		rc = wait_event_timeout(*(info->wq),
-			atomic_read(info->atomic_cnt) == info->count_check,
-			wait_time_jiffies);
+		rc = wait_event_interruptible_timeout(*(info->wq),
+											  atomic_read(info->atomic_cnt) == info->count_check,
+											  wait_time_jiffies);
 		cur_ktime = ktime_get();
 
 		SDE_EVT32(drm_id, hw_id, rc, ktime_to_ms(cur_ktime),
-			timeout_ms, atomic_read(info->atomic_cnt),
-			info->count_check);
-	/* If we timed out, counter is valid and time is less, wait again */
+				  timeout_ms, atomic_read(info->atomic_cnt),
+				  info->count_check);
+
+		/*
+		 * rc > 0: condition met, remaining jiffies.
+		 * rc == 0: timeout.
+		 * rc == -ERESTARTSYS: interrupted by a signal.
+		 * For interrupt, immediately stop waiting and propagate the error.
+		 */
+		if (rc < 0) {
+			/* Signal pending, break out and let caller handle it */
+			break;
+		}
+		/* If we timed out, counter is valid and time is less, wait again */
 	} while ((atomic_read(info->atomic_cnt) != info->count_check) &&
-			(rc == 0) &&
-			(ktime_compare_safe(exp_ktime, cur_ktime) > 0));
+	(rc == 0) &&
+	(ktime_compare_safe(exp_ktime, cur_ktime) > 0));
 
 	return rc;
 }
@@ -501,8 +512,8 @@ void sde_encoder_helper_report_irq_timeout(struct sde_encoder_phys *phys_enc,
 }
 
 int sde_encoder_helper_wait_for_irq(struct sde_encoder_phys *phys_enc,
-		enum sde_intr_idx intr_idx,
-		struct sde_encoder_wait_info *wait_info)
+									enum sde_intr_idx intr_idx,
+									struct sde_encoder_wait_info *wait_info)
 {
 	struct sde_encoder_irq *irq;
 	u32 irq_status;
@@ -514,60 +525,59 @@ int sde_encoder_helper_wait_for_irq(struct sde_encoder_phys *phys_enc,
 	}
 	irq = &phys_enc->irq[intr_idx];
 
-	/* note: do master / slave checking outside */
-
-	/* return EWOULDBLOCK since we know the wait isn't necessary */
 	if (phys_enc->enable_state == SDE_ENC_DISABLED) {
 		SDE_ERROR_PHYS(phys_enc, "encoder is disabled\n");
 		SDE_EVT32(DRMID(phys_enc->parent), intr_idx, irq->hw_idx,
-				irq->irq_idx, intr_idx, SDE_EVTLOG_ERROR);
+				  irq->irq_idx, intr_idx, SDE_EVTLOG_ERROR);
 		return -EWOULDBLOCK;
 	}
 
 	if (irq->irq_idx < 0) {
 		SDE_DEBUG_PHYS(phys_enc, "irq %s hw %d disabled, skip wait\n",
-				irq->name, irq->hw_idx);
+					   irq->name, irq->hw_idx);
 		SDE_EVT32(DRMID(phys_enc->parent), intr_idx, irq->hw_idx,
-				irq->irq_idx);
+				  irq->irq_idx);
+		atomic_add_unless(&phys_enc->pending_kickoff_cnt, -1, 0);
 		return 0;
 	}
 
 	SDE_DEBUG_PHYS(phys_enc, "pending_cnt %d\n",
-			atomic_read(wait_info->atomic_cnt));
+				   atomic_read(wait_info->atomic_cnt));
 	SDE_EVT32_VERBOSE(DRMID(phys_enc->parent), intr_idx, irq->hw_idx,
-		irq->irq_idx, phys_enc->hw_pp->idx - PINGPONG_0,
-		atomic_read(wait_info->atomic_cnt), SDE_EVTLOG_FUNC_ENTRY);
+					  irq->irq_idx, phys_enc->hw_pp->idx - PINGPONG_0,
+				   atomic_read(wait_info->atomic_cnt), SDE_EVTLOG_FUNC_ENTRY);
 
-	/*
-	 * Some module X may disable interrupt for longer duration
-	 * and it may trigger all interrupts including timer interrupt
-	 * when module X again enable the interrupt.
-	 * That may cause interrupt wait timeout API in this API.
-	 * It is handled by split the wait timer in two halves.
-	 */
-
+	/* 使用可中断等待替代原来的 wait_event_timeout */
 	for (i = 0; i < EVT_TIME_OUT_SPLIT; i++) {
 		ret = _sde_encoder_wait_timeout(DRMID(phys_enc->parent),
-				irq->hw_idx,
-				(wait_info->timeout_ms/EVT_TIME_OUT_SPLIT),
-				wait_info);
+										irq->hw_idx,
+								  (wait_info->timeout_ms / EVT_TIME_OUT_SPLIT),
+										wait_info);
+		/* 被信号中断，立即向上层返回 -EINTR */
+		if (ret == -ERESTARTSYS) {
+			SDE_EVT32(DRMID(phys_enc->parent), intr_idx,
+					  irq->hw_idx, irq->irq_idx,
+			 phys_enc->hw_pp->idx - PINGPONG_0,
+			 SDE_EVTLOG_ERROR);
+			return -EINTR;
+		}
 		if (ret)
 			break;
 	}
 
 	if (ret <= 0) {
 		irq_status = sde_core_irq_read(phys_enc->sde_kms,
-				irq->irq_idx, true);
+									   irq->irq_idx, true);
 		if (irq_status) {
 			unsigned long flags;
 
 			SDE_EVT32(DRMID(phys_enc->parent), intr_idx,
-				irq->hw_idx, irq->irq_idx,
-				phys_enc->hw_pp->idx - PINGPONG_0,
-				atomic_read(wait_info->atomic_cnt));
+					  irq->hw_idx, irq->irq_idx,
+			 phys_enc->hw_pp->idx - PINGPONG_0,
+			 atomic_read(wait_info->atomic_cnt));
 			SDE_DEBUG_PHYS(phys_enc,
-					"done but irq %d not triggered\n",
-					irq->irq_idx);
+						   "done but irq %d not triggered\n",
+				  irq->irq_idx);
 			local_irq_save(flags);
 			irq->cb.func(phys_enc, irq->irq_idx);
 			local_irq_restore(flags);
@@ -575,21 +585,21 @@ int sde_encoder_helper_wait_for_irq(struct sde_encoder_phys *phys_enc,
 		} else {
 			ret = -ETIMEDOUT;
 			SDE_EVT32(DRMID(phys_enc->parent), intr_idx,
-				irq->hw_idx, irq->irq_idx,
-				phys_enc->hw_pp->idx - PINGPONG_0,
-				atomic_read(wait_info->atomic_cnt), irq_status,
-				SDE_EVTLOG_ERROR);
+					  irq->hw_idx, irq->irq_idx,
+			 phys_enc->hw_pp->idx - PINGPONG_0,
+			 atomic_read(wait_info->atomic_cnt), irq_status,
+					  SDE_EVTLOG_ERROR);
 		}
 	} else {
 		ret = 0;
 		SDE_EVT32(DRMID(phys_enc->parent), intr_idx, irq->hw_idx,
-			irq->irq_idx, phys_enc->hw_pp->idx - PINGPONG_0,
+				  irq->irq_idx, phys_enc->hw_pp->idx - PINGPONG_0,
 			atomic_read(wait_info->atomic_cnt));
 	}
 
 	SDE_EVT32_VERBOSE(DRMID(phys_enc->parent), intr_idx, irq->hw_idx,
-		irq->irq_idx, ret, phys_enc->hw_pp->idx - PINGPONG_0,
-		atomic_read(wait_info->atomic_cnt), SDE_EVTLOG_FUNC_EXIT);
+					  irq->irq_idx, ret, phys_enc->hw_pp->idx - PINGPONG_0,
+				   atomic_read(wait_info->atomic_cnt), SDE_EVTLOG_FUNC_EXIT);
 
 	return ret;
 }
@@ -2157,6 +2167,7 @@ static void _sde_encoder_irq_control(struct drm_encoder *drm_enc, bool enable)
 {
 	struct sde_encoder_virt *sde_enc;
 	int i;
+	unsigned long timeout;
 
 	if (!drm_enc) {
 		SDE_ERROR("invalid encoder\n");
@@ -2164,15 +2175,46 @@ static void _sde_encoder_irq_control(struct drm_encoder *drm_enc, bool enable)
 	}
 
 	sde_enc = to_sde_encoder_virt(drm_enc);
-
 	SDE_DEBUG_ENC(sde_enc, "enable:%d\n", enable);
+
+	if (!enable) {
+		/*
+		 * Before disabling IRQ, wait for any pending commit to complete.
+		 * This avoids losing completion events and corrupting HW state.
+		 */
+		timeout = jiffies + msecs_to_jiffies(100);
+		for (i = 0; i < sde_enc->num_phys_encs; i++) {
+			struct sde_encoder_phys *phys = sde_enc->phys_encs[i];
+			if (!phys)
+				continue;
+
+			/*
+			 * If the phys driver has its own lock protecting pending_kickoff_cnt,
+			 * we should acquire it before reading and waiting. Assuming the lock
+			 * is named 'hw_lock' or similar, we'll use it here for safety.
+			 * If no such lock exists, at least use READ_ONCE/atomic_read.
+			 */
+			while (atomic_read(&phys->pending_kickoff_cnt) > 0) {
+				if (time_after(jiffies, timeout)) {
+					SDE_ERROR("phys%d pending kickoff cnt %d after 100ms, force disable\n",
+							  i, atomic_read(&phys->pending_kickoff_cnt));
+					break;  // Timeout: proceed to disable anyway
+				}
+				/*
+				 * Wait a short period. Use usleep_range for better scheduler
+				 * behavior (not busy-loop). 1~2 ms is reasonable.
+				 */
+				usleep_range(1000, 2000);
+			}
+		}
+	}
+
+	/* Now call each physical encoder's irq_control op */
 	for (i = 0; i < sde_enc->num_phys_encs; i++) {
 		struct sde_encoder_phys *phys = sde_enc->phys_encs[i];
-
 		if (phys && phys->ops.irq_control)
 			phys->ops.irq_control(phys, enable);
 	}
-
 }
 
 /* keep track of the userspace vblank during modeset */

@@ -325,6 +325,7 @@ struct sde_encoder_phys {
 	atomic_t pending_retire_fence_cnt;
 	wait_queue_head_t pending_kickoff_wq;
 	struct sde_encoder_irq irq[INTR_IDX_MAX];
+	bool irq_enabled;   /* whether IRQ is currently enabled */
 	bool has_intf_te;
 	bool cont_splash_enabled;
 	bool in_clone_mode;
