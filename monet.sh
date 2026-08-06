@@ -58,18 +58,16 @@ IMAGE="$OUT/arch/arm64/boot/Image"
 [ -f "$IMAGE" ] || error "Image not produced"
 
 echo "monet: verifying key config"
-for opt in CONFIG_KSU=y CONFIG_EROFS_FS=y CONFIG_BOARD_MONET=y; do
+for opt in CONFIG_KSU=y CONFIG_KSU_SUSFS=y CONFIG_EROFS_FS=y CONFIG_BOARD_MONET=y; do
     grep -q "^${opt%%=*}=${opt#*=}$" "$OUT/.config" ||
         error "missing expected $opt in $OUT/.config"
 done
-grep -q "^CONFIG_KSU_SUSFS=" "$OUT/.config" &&
-    error "CONFIG_KSU_SUSFS unexpectedly enabled"
 
 echo "monet: staging kernel into ak3 template"
 rm -f "$AK3/Image" "$AK3/Image.gz" "$AK3/Image.gz-dtb" "$AK3/dtbo.img"
 cp "$IMAGE" "$AK3/Image"
 
-ZIP="$DIST/monet-4.19-KSU-noSUSFS.zip"
+ZIP="$DIST/monet-4.19-KSU-SUSFS.zip"
 rm -f "$ZIP"
 echo "monet: packaging $ZIP"
 (cd "$AK3" && find . -type f | sort | zip -9 -X "$ZIP" -@ >/dev/null)

@@ -1680,14 +1680,23 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
 			goto out_free;
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 		vma = find_vma(mm, start_vaddr);
-		if (vma && vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
+		if (vma && vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))) {
+			unsigned long nr_entries = (end - start_vaddr) >> PAGE_SHIFT;
+			unsigned long i;
+			if (nr_entries > pm.len - pm.pos)
+				nr_entries = pm.len - pm.pos;
+			for (i = 0; i < nr_entries; i++) {
+				((u64 *)pm.buffer)[pm.pos + i] = 0;
+			}
+			pm.pos += nr_entries;
 			goto bypass_orig_flow;
-#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+		}
 		ret = walk_page_range(start_vaddr, end, &pagemap_walk);
-		mmap_read_unlock(mm);
-#ifdef CONFIG_KSU_SUSFS_SUS_MAP
-		bypass_orig_flow:
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+bypass_orig_flow:
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+		mmap_read_unlock(mm);
 		start_vaddr = end;
 
 		len = min(count, PM_ENTRY_BYTES * pm.pos);
