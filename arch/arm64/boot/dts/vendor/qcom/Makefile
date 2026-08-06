@@ -88,9 +88,9 @@ ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
 
 ifeq ($(CONFIG_BOARD_MONET),y)
 dtbo-$(CONFIG_BOARD_MONET) += \
-                moent-sm7250-overlay.dtbo
+                monet-sm7250-overlay.dtbo
 dtb-$(CONFIG_BOARD_MONET) += \
-                moent-sm7250.dtb
+                monet-sm7250.dtb
 monet-sm7250-overlay.dtbo-base := lito.dtb lito-v2.dtb
 endif
 
