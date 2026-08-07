@@ -51,8 +51,10 @@ make O="$OUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang LD=ld.lld \
     olddefconfig </dev/null >/dev/null
 
 echo "monet: building Image (jobs=$JOBS)"
+# LOCALVERSION="" pins the version string (no scm "+" even when the
+# working tree is dirty), so the release shows as e.g. 4.19.325-KaYuKernel
 make O="$OUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 CC=clang LD=ld.lld \
-    CROSS_COMPILE=aarch64-linux-gnu- -j"$JOBS" Image
+    CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= -j"$JOBS" Image
 
 IMAGE="$OUT/arch/arm64/boot/Image"
 [ -f "$IMAGE" ] || error "Image not produced"
