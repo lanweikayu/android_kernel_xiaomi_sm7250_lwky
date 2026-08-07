@@ -500,10 +500,9 @@ flash_boot() {
     flash_erase $BLOCK 0 0;
     nandwrite -p $BLOCK boot-new.img;
   elif [ "$CUSTOMDD" ]; then
-    dd if=/dev/zero of=$BLOCK $CUSTOMDD 2>/dev/null;
     dd if=boot-new.img of=$BLOCK $CUSTOMDD;
   else
-    cat boot-new.img /dev/zero > $BLOCK 2>/dev/null || true;
+    dd if=boot-new.img of=$BLOCK bs=4096 2>/dev/null;
   fi;
   if [ $? != 0 ]; then
     abort "Flashing image failed. Aborting...";
@@ -598,10 +597,9 @@ flash_generic() {
       flash_erase $imgblock 0 0;
       nandwrite -p $imgblock $img;
     elif [ "$CUSTOMDD" ]; then
-      dd if=/dev/zero of=$imgblock 2>/dev/null;
       dd if=$img of=$imgblock;
     else
-      cat $img /dev/zero > $imgblock 2>/dev/null || true;
+      dd if=$img of=$imgblock bs=4096 2>/dev/null;
     fi;
     if [ $? != 0 ]; then
       abort "Flashing $1 failed. Aborting...";
