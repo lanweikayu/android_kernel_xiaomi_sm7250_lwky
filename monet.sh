@@ -60,7 +60,7 @@ IMAGE="$OUT/arch/arm64/boot/Image"
 [ -f "$IMAGE" ] || error "Image not produced"
 
 echo "monet: verifying key config"
-for opt in CONFIG_KSU=y CONFIG_KSU_SUSFS=y CONFIG_EROFS_FS=y CONFIG_BOARD_MONET=y; do
+for opt in CONFIG_KSU=y CONFIG_KSU_SUSFS=y CONFIG_EROFS_FS=y CONFIG_FUSE_BPF=y CONFIG_BOARD_MONET=y; do
     grep -q "^${opt%%=*}=${opt#*=}$" "$OUT/.config" ||
         error "missing expected $opt in $OUT/.config"
 done
