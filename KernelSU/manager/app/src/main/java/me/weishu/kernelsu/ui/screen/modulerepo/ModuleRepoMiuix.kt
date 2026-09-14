@@ -5,7 +5,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.EaseInOut
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -77,6 +76,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import me.weishu.kernelsu.R
 import me.weishu.kernelsu.ui.component.ListPopupDefaults
+import me.weishu.kernelsu.ui.component.PagerNavigationSpringSpec
 import me.weishu.kernelsu.ui.component.ScrollToTopOnChange
 import me.weishu.kernelsu.ui.component.SearchStatus
 import me.weishu.kernelsu.ui.component.dialog.ConfirmDialogHandle
@@ -90,6 +90,7 @@ import me.weishu.kernelsu.ui.theme.LocalEnableBlur
 import me.weishu.kernelsu.ui.theme.isInDarkTheme
 import me.weishu.kernelsu.ui.util.BlurredBar
 import me.weishu.kernelsu.ui.util.download
+import me.weishu.kernelsu.ui.util.isDownloadAvailable
 import me.weishu.kernelsu.ui.util.rememberBlurBackdrop
 import me.weishu.kernelsu.ui.util.rememberContentReady
 import top.yukonga.miuix.kmp.basic.Card
@@ -781,6 +782,7 @@ fun ReleasesPage(
                                                             },
                                                             onDownloading = { isDownloading = true },
                                                             onProgress = { p -> scope.launch(Dispatchers.Main) { progress = p } })
+                                                        isDownloading = false
                                                     }
                                                 }
                                                 confirmDialog.showConfirm(title = confirmTitle, content = startText)
@@ -815,11 +817,12 @@ fun ReleasesPage(
                                                     minWidth = 35.dp,
                                                     onClick = {
                                                         val uri = downloadedUri ?: return@IconButton
-                                                        val file = uri.path?.let { java.io.File(it) }
-                                                        if (file != null && file.exists()) {
-                                                            onInstallModule(uri)
-                                                        } else {
-                                                            downloadedUri = null
+                                                        scope.launch {
+                                                            if (isDownloadAvailable(uri)) {
+                                                                onInstallModule(uri)
+                                                            } else {
+                                                                downloadedUri = null
+                                                            }
                                                         }
                                                     },
                                                 ) {
@@ -1091,7 +1094,10 @@ fun ModuleRepoDetailScreenMiuix(
                             selectedTabIndex = pagerState.currentPage,
                             onTabSelected = { index ->
                                 coroutineScope.launch {
-                                    pagerState.animateScrollToPage(page = index, animationSpec = tween(easing = EaseInOut))
+                                    pagerState.animateScrollToPage(
+                                        page = index,
+                                        animationSpec = PagerNavigationSpringSpec,
+                                    )
                                 }
                             },
                             colors = TabRowDefaults.tabRowColors(
@@ -1109,6 +1115,7 @@ fun ModuleRepoDetailScreenMiuix(
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
+            overscrollEffect = null,
         ) { page ->
             val innerPadding = PaddingValues(
                 top = innerPadding.calculateTopPadding(),
